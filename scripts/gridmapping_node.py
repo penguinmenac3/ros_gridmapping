@@ -103,6 +103,7 @@ class GridMapping(object):
         self.frames_since_remap = 0
         self.remap_distance = 10
         self.weight = 0.05
+        self.min_dist = 0.5
         rospy.init_node("gridmapping_node")
 
         self._map_pub = rospy.Publisher('map', OccupancyGrid, latch=True)
@@ -148,6 +149,9 @@ class GridMapping(object):
         for x in self.scans:
             pose = data.poses[int(x)]
             for p in self.scans[x]:
+                # Skip if scan point is to close to robot. It maybe only sees itself.
+                if p[0] * p[0] + p[1] * p[1] < self.min_dist * self.min_dist:
+                    continue
                 transformed = self.transform_point(pose, p)
                 # Add to gridmap
                 gmap.set_cell(transformed[0], transformed[1], self.weight)
