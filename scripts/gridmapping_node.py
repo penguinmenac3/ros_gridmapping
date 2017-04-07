@@ -29,7 +29,7 @@ class Map(object):
     with increasing row number. 
     """
 
-    def __init__(self, origin_x=-10, origin_y=-10, resolution=.1, 
+    def __init__(self, origin_x=-10.0, origin_y=-10.0, resolution=.1,
                  width=1000, height=1000):
         """ Construct an empty occupancy grid.
         
@@ -93,17 +93,21 @@ class Map(object):
         ix = int((x - self.origin_x) / self.resolution)
         iy = int((y - self.origin_y) / self.resolution)
         if ix < 0 or iy < 0 or ix >= self.width or iy >= self.height:
-            print("Map to small.")
+            #print("Map to small.")
+            return
         self.grid[iy, ix] = min(1.0, self.grid[iy, ix] + val)
 
 class GridMapping(object):
     def __init__(self):
         self.lock = threading.Lock()
         self.scans = {}
-        self.frames_since_remap = 0
-        self.remap_distance = 10
+        self.frames_since_remap = 10000
+        self.remap_distance = 5
         self.weight = 0.05
         self.min_dist = 0.5
+        self.max_scans = 100
+        self.map_size = 30
+        self.map_grid_cell_size = 0.1
         rospy.init_node("gridmapping_node")
 
         self._map_pub = rospy.Publisher('map', OccupancyGrid, latch=True)
@@ -145,9 +149,14 @@ class GridMapping(object):
             return
             
         # Fill gridmap
-        gmap = Map()
-        for x in self.scans:
-            pose = data.poses[int(x)]
+        scan_len = len(self.scans)
+        it_len = min(self.max_scans, scan_len)
+        gmap = Map(data.poses[-1].x - self.map_size / 2.0, data.poses[-1].y - self.map_size / 2.0, self.map_grid_cell_size,
+                   int(self.map_size / self.map_grid_cell_size), int(self.map_size / self.map_grid_cell_size))
+        for i in range(it_len):
+            idx = i + scan_len - it_len + 1
+            x = str(idx)
+            pose = data.poses[idx]
             for p in self.scans[x]:
                 # Skip if scan point is to close to robot. It maybe only sees itself.
                 if p[0] * p[0] + p[1] * p[1] < self.min_dist * self.min_dist:
