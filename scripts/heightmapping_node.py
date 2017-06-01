@@ -7,7 +7,9 @@ from geometry_msgs.msg import Pose, Point, Quaternion
 from ros_graph_slam.msg import PoseNode, Path2D
 from nav_msgs.msg import OccupancyGrid, MapMetaData
 import sensor_msgs.point_cloud2 as pc2
-
+import tf2_ros
+from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
+import traceback
 import numpy as np
 
 class Map(object):
@@ -82,7 +84,7 @@ class Map(object):
         grid_msg.data = list(np.round(flat_grid))
         return grid_msg
 
-    def set_cell(self, x, y, val):
+    def set_cell(self, x, y, val, gamma=0.2):
         """ Set the value of a cell in the grid. 
 
         Arguments: 
@@ -95,7 +97,7 @@ class Map(object):
         if ix < 0 or iy < 0 or ix >= self.width or iy >= self.height:
             #print("Map to small.")
             return
-        self.grid[iy, ix] = min(1.0, self.grid[iy, ix] + val)
+        self.grid[iy, ix] = max(0.0, min(1.0, self.grid[iy, ix] * (1.0 - gamma) + val * gamma))
 
 class GridMapping(object):
     def __init__(self):
@@ -103,7 +105,7 @@ class GridMapping(object):
         self.scans = {}
         self.frames_since_remap = 10000
         self.remap_distance = 5
-        self.weight = 0.05
+        self.weight = 0.2
         self.min_dist = 0.5
         self.max_scans = 100
         self.map_size = 30
@@ -112,6 +114,8 @@ class GridMapping(object):
 
         self._map_pub = rospy.Publisher('map', OccupancyGrid, latch=True)
         self._map_data_pub = rospy.Publisher('map_metadata', MapMetaData, latch=True)
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
 
         rospy.Subscriber('~/trajectory2d', Path2D, self.trajectory_callack)
         rospy.Subscriber("~/pose_node", PoseNode, self.pose_node_callback)
@@ -134,10 +138,25 @@ class GridMapping(object):
 
     def pose_node_callback(self, data):
         self.lock.acquire()
-        tmp = pc2.read_points(data.scan)
+        transform = None
+        try:
+            #now = data.scan.header.stamp
+            now = rospy.Time()
+            #now = rospy.Time.now()
+            #print("base_link -> " + data.scan.header.frame_id)
+            transform = self.tf_buffer.lookup_transform("base_link", data.scan.header.frame_id, now)
+            #transform = trans
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+            print("Oh nose..")
+            traceback.print_exc()
+            self.lock.release()
+            return
+        cloud = do_transform_cloud(data.scan, transform)
+        tmp = pc2.read_points(cloud, skip_nans=True, field_names=("x", "y", "z"))
         tmp2 = []
         for x in tmp:
-            tmp2.append([x[0], x[1]])
+            tmp2.append([x[0], x[1], x[2]])
+            #print((x[0], x[1], x[2]))
         self.scans[str(data.id)] = tmp2
         self.lock.release()
 
@@ -165,7 +184,9 @@ class GridMapping(object):
                     continue
                 transformed = self.transform_point(pose, p)
                 # Add to gridmap
-                gmap.set_cell(transformed[0], transformed[1], self.weight)
+                if not math.isnan(p[2]):
+                    #print(p[2])
+                    gmap.set_cell(transformed[0], transformed[1], p[2], self.weight)
 
         self.publish_map(gmap)
         self.frames_since_remap = 0
