@@ -97,7 +97,7 @@ class Map(object):
         if ix < 0 or iy < 0 or ix >= self.width or iy >= self.height:
             #print("Map to small.")
             return
-        self.grid[iy, ix] = max(0.0, min(1.0, self.grid[iy, ix] * (1.0 - gamma) + val * gamma))
+        self.grid[iy, ix] = max(0.0, min(1.0, max(self.grid[iy, ix] * (1.0 - gamma) + val * gamma, val)))
 
 class GridMapping(object):
     def __init__(self):
@@ -186,7 +186,7 @@ class GridMapping(object):
                 # Add to gridmap
                 if not math.isnan(p[2]):
                     #print(p[2])
-                    gmap.set_cell(transformed[0], transformed[1], p[2], self.weight)
+                    gmap.set_cell(transformed[0], transformed[1], p[2] * 2, self.weight)
 
         self.publish_map(gmap)
         self.frames_since_remap = 0
